@@ -12,6 +12,7 @@ import {
 import { getHandles, Handle, renderScene } from '../engine/renderer';
 import { canvasToScreen, screenToCanvas, Viewport } from '../engine/transform';
 import { createElement, DEFAULT_STYLES, ElementStyleState } from '../engine/elementUtils';
+import { ContextMenu, ContextMenuState } from './ContextMenu';
 
 interface CanvasProps {
   elements: CanvasElement[];
@@ -26,12 +27,17 @@ interface CanvasProps {
   currentStyles: ElementStyleState;
   userId: string;
   showGrid: boolean;
+  setShowGrid: (show: boolean) => void;
   snapGrid: boolean;
   isDarkMode: boolean;
   isReadOnly: boolean;
   remoteUsers: UserPresence[];
   onCommitChange: (before: CanvasElement[], after: CanvasElement[]) => void;
   onCursorMove: (x: number | null, y: number | null, isLaser?: boolean) => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+  onReorder: (action: 'front' | 'forward' | 'backward' | 'back') => void;
+  onZoomToFit: () => void;
 }
 
 type InteractionMode =
@@ -58,12 +64,17 @@ export const Canvas: React.FC<CanvasProps> = ({
   currentStyles,
   userId,
   showGrid,
+  setShowGrid,
   snapGrid,
   isDarkMode,
   isReadOnly,
   remoteUsers,
   onCommitChange,
   onCursorMove,
+  onDuplicate,
+  onDelete,
+  onReorder,
+  onZoomToFit,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -95,7 +106,11 @@ export const Canvas: React.FC<CanvasProps> = ({
     isNew: boolean;
   } | null>(null);
   const [textValue, setTextValue] = useState<string>('');
+  const textValueRef = useRef<string>('');
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Context Menu State
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
   // Snapshot before interaction for history
   const beforeSnapshotRef = useRef<CanvasElement[]>([]);
@@ -110,19 +125,23 @@ export const Canvas: React.FC<CanvasProps> = ({
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport;
 
-  // Auto-focus textarea whenever text editing starts
+  // Auto-focus textarea ONLY when a new text session starts (prevents re-triggering on every keystroke)
+  const editingElementId = editingText?.elementId;
   useEffect(() => {
-    if (editingText) {
-      setTextValue(editingText.text);
+    if (editingElementId) {
+      const initial = editingText?.text || '';
+      setTextValue(initial);
+      textValueRef.current = initial;
       const timer = setTimeout(() => {
         if (textareaRef.current) {
           textareaRef.current.focus();
-          textareaRef.current.select();
+          const len = textareaRef.current.value.length;
+          textareaRef.current.setSelectionRange(len, len);
         }
-      }, 30);
+      }, 40);
       return () => clearTimeout(timer);
     }
-  }, [editingText]);
+  }, [editingElementId]);
 
   // Track window resize & high-DPI scaling
   useEffect(() => {
@@ -199,9 +218,14 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   // Pointer Down
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    // If context menu is open, close it
+    if (contextMenu) {
+      setContextMenu(null);
+    }
+
     // If text editing was active and user clicked elsewhere, finish previous text
     if (editingText) {
-      handleFinishEditingText(textValue);
+      handleFinishEditingText(textValueRef.current);
       return;
     }
 
@@ -265,13 +289,15 @@ export const Canvas: React.FC<CanvasProps> = ({
       beforeSnapshotRef.current = elementsRef.current;
       setElements((prev) => [...prev, newEl]);
       setSelectedIds([newEl.id]);
+      textValueRef.current = '';
+      setTextValue('');
       setEditingText({
         elementId: newEl.id,
         text: '',
         x: initX,
         y: initY,
-        width: 160,
-        height: 40,
+        width: 140,
+        height: 38,
         fontSize: currentStyles.fontSize,
         fontFamily: currentStyles.fontFamily,
         color: currentStyles.strokeColor,
@@ -675,20 +701,127 @@ export const Canvas: React.FC<CanvasProps> = ({
       .find((el) => isPointInElement(canvasPos, el));
 
     if (hit) {
-      beforeSnapshotRef.current = elementsRef.current;
-      setEditingText({
-        elementId: hit.id,
-        text: hit.text || '',
-        x: hit.x,
-        y: hit.y,
-        width: Math.max(140, hit.width),
-        height: Math.max(40, hit.height),
-        fontSize: hit.fontSize || 20,
-        fontFamily: hit.fontFamily || 'hand',
-        color: hit.strokeColor,
-        isNew: false,
-      });
+      handleStartEditText(hit);
     }
+  };
+
+  // Right-click context menu
+  const handleContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (editingText) {
+      handleFinishEditingText(textValueRef.current);
+    }
+
+    const canvasPos = screenToCanvas(e.clientX, e.clientY, viewportRef.current);
+    const hit = [...elementsRef.current]
+      .reverse()
+      .find((el) => isPointInElement(canvasPos, el)) || null;
+
+    if (hit) {
+      if (!selectedIdsRef.current.includes(hit.id)) {
+        setSelectedIds([hit.id]);
+      }
+    }
+
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      canvasX: canvasPos.x,
+      canvasY: canvasPos.y,
+      targetElement: hit,
+    });
+  };
+
+  const handleAddTextAt = (x: number, y: number) => {
+    const newEl = createElement(
+      'text',
+      x,
+      y,
+      currentStyles,
+      userId,
+      { text: '', width: 140, height: 38 }
+    );
+    beforeSnapshotRef.current = elementsRef.current;
+    setElements((prev) => [...prev, newEl]);
+    setSelectedIds([newEl.id]);
+    textValueRef.current = '';
+    setTextValue('');
+    setEditingText({
+      elementId: newEl.id,
+      text: '',
+      x,
+      y,
+      width: 140,
+      height: 38,
+      fontSize: currentStyles.fontSize,
+      fontFamily: currentStyles.fontFamily,
+      color: currentStyles.strokeColor,
+      isNew: true,
+    });
+  };
+
+  const handleAddFlowchartShape = (
+    type: 'rectangle' | 'diamond' | 'ellipse',
+    labelText: string,
+    x: number,
+    y: number
+  ) => {
+    const width = type === 'diamond' ? 140 : type === 'ellipse' ? 130 : 150;
+    const height = type === 'diamond' ? 100 : type === 'ellipse' ? 60 : 70;
+
+    const fillColors = {
+      rectangle: '#a5d8ff',
+      diamond: '#ffec99',
+      ellipse: '#b2f2bb',
+    };
+    const strokeColors = {
+      rectangle: '#1971c2',
+      diamond: '#f08c00',
+      ellipse: '#2f9e44',
+    };
+
+    const newEl = createElement(
+      type,
+      x - width / 2,
+      y - height / 2,
+      {
+        ...currentStyles,
+        fillStyle: 'hachure',
+        fillColor: fillColors[type],
+        strokeColor: strokeColors[type],
+      },
+      userId,
+      {
+        width,
+        height,
+        text: labelText,
+      }
+    );
+
+    const before = elementsRef.current;
+    const after = [...before, newEl];
+    setElements(after);
+    setSelectedIds([newEl.id]);
+    onCommitChange(before, after);
+  };
+
+  const handleStartEditText = (target: CanvasElement) => {
+    beforeSnapshotRef.current = elementsRef.current;
+    const initial = target.text || '';
+    textValueRef.current = initial;
+    setTextValue(initial);
+    setEditingText({
+      elementId: target.id,
+      text: initial,
+      x: target.x,
+      y: target.y,
+      width: Math.max(140, target.width),
+      height: Math.max(40, target.height),
+      fontSize: target.fontSize || 20,
+      fontFamily: target.fontFamily || 'hand',
+      color: target.strokeColor,
+      isNew: false,
+    });
   };
 
   // Finish editing text
@@ -696,7 +829,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     if (!editingText || isFinishingTextRef.current) return;
     isFinishingTextRef.current = true;
 
-    const trimmed = finalText.trim();
+    const trimmed = (finalText || '').trim();
     if (trimmed === '') {
       if (editingText.isNew) {
         // Delete empty new text element
@@ -730,6 +863,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     onCommitChange(beforeSnapshotRef.current, elementsRef.current);
     setEditingText(null);
     setTextValue('');
+    textValueRef.current = '';
     if (!isLocked) {
       setActiveTool('select');
     }
@@ -776,7 +910,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   }
 
   return (
-    <div className="canvas-container">
+    <div className="canvas-container" onContextMenu={handleContextMenu}>
       <canvas
         ref={canvasRef}
         onPointerDown={handlePointerDown}
@@ -808,13 +942,27 @@ export const Canvas: React.FC<CanvasProps> = ({
           ref={textareaRef}
           value={textValue}
           onChange={(e) => {
-            setTextValue(e.target.value);
-            const lines = e.target.value.split('\n');
-            const maxLineLen = Math.max(...lines.map((l) => l.length), 4);
-            const fs = editingText.fontSize || 20;
-            const newW = Math.max(140, maxLineLen * (fs * 0.65) + 30);
-            const newH = Math.max(38, lines.length * (fs * 1.35) + 12);
-            setEditingText((prev) => prev ? { ...prev, width: newW, height: newH } : null);
+            const val = e.target.value;
+            setTextValue(val);
+            textValueRef.current = val;
+
+            // Live update canvas element so text appears in real time
+            if (editingText) {
+              setElements((prev) =>
+                prev.map((el) => {
+                  if (el.id === editingText.elementId) {
+                    return {
+                      ...el,
+                      text: val,
+                      version: el.version + 1,
+                      versionNonce: Date.now(),
+                      updatedBy: userId,
+                    };
+                  }
+                  return el;
+                })
+              );
+            }
           }}
           onPointerDown={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
@@ -823,14 +971,14 @@ export const Canvas: React.FC<CanvasProps> = ({
           onKeyDown={(e) => {
             e.stopPropagation(); // Stops global shortcuts from intercepting typing
             if (e.key === 'Escape') {
-              handleFinishEditingText(textValue);
+              handleFinishEditingText(textValueRef.current);
             }
             if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-              handleFinishEditingText(textValue);
+              handleFinishEditingText(textValueRef.current);
             }
           }}
           onBlur={() => {
-            handleFinishEditingText(textValue);
+            handleFinishEditingText(textValueRef.current);
           }}
           placeholder="Type something..."
           style={{
@@ -860,6 +1008,21 @@ export const Canvas: React.FC<CanvasProps> = ({
           }}
         />
       )}
+
+      {/* Right-Click Context Menu */}
+      <ContextMenu
+        menu={contextMenu}
+        onClose={() => setContextMenu(null)}
+        onAddText={handleAddTextAt}
+        onAddFlowchartShape={handleAddFlowchartShape}
+        onEditText={handleStartEditText}
+        onDuplicate={onDuplicate}
+        onDelete={onDelete}
+        onReorder={onReorder}
+        onZoomToFit={onZoomToFit}
+        onToggleGrid={() => setShowGrid(!showGrid)}
+        hasSelection={selectedIds.length > 0}
+      />
     </div>
   );
 };

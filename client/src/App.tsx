@@ -787,12 +787,17 @@ export const App: React.FC = () => {
         currentStyles={currentStyles}
         userId={userId}
         showGrid={showGrid}
+        setShowGrid={setShowGrid}
         snapGrid={snapGrid}
         isDarkMode={isDarkMode}
         isReadOnly={isReadOnly}
         remoteUsers={remoteUsers}
         onCommitChange={handleCommitChange}
         onCursorMove={handleCursorMove}
+        onDuplicate={handleDuplicate}
+        onDelete={handleDelete}
+        onReorder={handleReorder}
+        onZoomToFit={handleZoomToFit}
       />
 
       {/* Live Remote Cursors Overlay */}
