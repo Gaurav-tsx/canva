@@ -19,6 +19,8 @@ import {
   ArrowDown,
   Copy,
   Trash2,
+  Lock,
+  Unlock,
 } from 'lucide-react';
 
 interface StylePanelProps {
@@ -28,6 +30,7 @@ interface StylePanelProps {
   onDuplicate: () => void;
   onDelete: () => void;
   onReorder: (action: 'front' | 'forward' | 'backward' | 'back') => void;
+  onToggleLock?: () => void;
 }
 
 export const StylePanel: React.FC<StylePanelProps> = ({
@@ -37,6 +40,7 @@ export const StylePanel: React.FC<StylePanelProps> = ({
   onDuplicate,
   onDelete,
   onReorder,
+  onToggleLock,
 }) => {
   const isTextSelected = selectedElements.some((e) => e.type === 'text');
   const hasSelection = selectedElements.length > 0;
@@ -330,6 +334,25 @@ export const StylePanel: React.FC<StylePanelProps> = ({
           <div>
             <div className="style-section-title">Actions</div>
             <div className="button-group">
+              {onToggleLock && (
+                <button
+                  type="button"
+                  className="button-group-item"
+                  onClick={onToggleLock}
+                  style={selectedElements.every((el) => el.isLocked) ? { color: '#ef4444' } : undefined}
+                  title={selectedElements.every((el) => el.isLocked) ? 'Unlock in Place' : 'Lock in Place'}
+                >
+                  {selectedElements.every((el) => el.isLocked) ? (
+                    <>
+                      <Lock size={14} /> Locked
+                    </>
+                  ) : (
+                    <>
+                      <Unlock size={14} /> Lock
+                    </>
+                  )}
+                </button>
+              )}
               <button
                 type="button"
                 className="button-group-item"

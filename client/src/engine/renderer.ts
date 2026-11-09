@@ -146,6 +146,7 @@ function drawLocalSelection(
   const bounds = getSelectionBounds(selectedElements);
   if (!bounds) return;
 
+  const isLocked = selectedElements.every((el) => el.isLocked);
   const pad = 6;
   const minX = bounds.minX - pad;
   const minY = bounds.minY - pad;
@@ -155,13 +156,42 @@ function drawLocalSelection(
   const h = maxY - minY;
 
   ctx.save();
-  ctx.strokeStyle = '#6366f1';
+  ctx.strokeStyle = isLocked ? '#ef4444' : '#6366f1';
   ctx.lineWidth = 1.5 / viewport.zoom;
   ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom]);
   ctx.strokeRect(minX, minY, w, h);
 
-  // Rotation handle line
   const cx = (minX + maxX) / 2;
+
+  if (isLocked) {
+    // Draw Lock badge above element
+    ctx.setLineDash([]);
+    const badgeText = '🔒 Locked';
+    const fontSize = Math.max(10, 11 / viewport.zoom);
+    ctx.font = `600 ${fontSize}px Inter, sans-serif`;
+    const textWidth = ctx.measureText(badgeText).width;
+    const badgePadX = 6 / viewport.zoom;
+    const badgePadY = 3 / viewport.zoom;
+    const badgeH = fontSize + badgePadY * 2;
+    const badgeW = textWidth + badgePadX * 2;
+    const badgeY = minY - badgeH - 4 / viewport.zoom;
+    const badgeX = cx - badgeW / 2;
+
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath();
+    ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4 / viewport.zoom);
+    ctx.fill();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(badgeText, cx, badgeY + badgeH / 2);
+
+    ctx.restore();
+    return;
+  }
+
+  // Rotation handle line
   const rotY = minY - 24 / viewport.zoom;
   ctx.beginPath();
   ctx.setLineDash([]);

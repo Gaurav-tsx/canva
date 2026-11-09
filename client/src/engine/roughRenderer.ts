@@ -21,7 +21,8 @@ export function getCachedImage(url: string): HTMLImageElement | null {
 export function drawElement(
   ctx: CanvasRenderingContext2D,
   rc: RoughCanvas,
-  element: CanvasElement
+  element: CanvasElement,
+  isEditing: boolean = false
 ) {
   if (element.isDeleted) return;
 

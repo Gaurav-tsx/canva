@@ -38,6 +38,7 @@ interface CanvasProps {
   onDuplicate: () => void;
   onDelete: () => void;
   onReorder: (action: 'front' | 'forward' | 'backward' | 'back') => void;
+  onToggleLockSelected?: () => void;
   onZoomToFit: () => void;
 }
 
@@ -75,6 +76,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   onDuplicate,
   onDelete,
   onReorder,
+  onToggleLockSelected,
   onZoomToFit,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -327,35 +329,52 @@ export const Canvas: React.FC<CanvasProps> = ({
         const bounds = getSelectionBounds(selected);
         if (bounds) {
           const pad = 6;
-          const handles = getHandles({
-            minX: bounds.minX - pad,
-            minY: bounds.minY - pad,
-            maxX: bounds.maxX + pad,
-            maxY: bounds.maxY + pad,
-          }, viewportRef.current.zoom);
+          const isElementLocked = selected.every((el) => el.isLocked);
 
-          for (const h of handles) {
-            if (distance(canvasPos, { x: h.x, y: h.y }) <= 16 / viewportRef.current.zoom) {
-              if (h.type === 'rotation') {
-                setMode('rotating');
-              } else {
-                setMode('resizing');
-                setActiveHandle(h);
+          // If elements are NOT locked, allow resizing, rotating, and moving
+          if (!isElementLocked) {
+            const handles = getHandles({
+              minX: bounds.minX - pad,
+              minY: bounds.minY - pad,
+              maxX: bounds.maxX + pad,
+              maxY: bounds.maxY + pad,
+            }, viewportRef.current.zoom);
+
+            for (const h of handles) {
+              if (distance(canvasPos, { x: h.x, y: h.y }) <= 16 / viewportRef.current.zoom) {
+                if (h.type === 'rotation') {
+                  setMode('rotating');
+                } else {
+                  setMode('resizing');
+                  setActiveHandle(h);
+                }
+                return;
               }
+            }
+
+            // 1b. If clicking INSIDE current selection bounds (without Shift), start moving selection!
+            if (
+              !e.shiftKey &&
+              canvasPos.x >= bounds.minX - pad &&
+              canvasPos.x <= bounds.maxX + pad &&
+              canvasPos.y >= bounds.minY - pad &&
+              canvasPos.y <= bounds.maxY + pad
+            ) {
+              setMode('moving');
               return;
             }
-          }
-
-          // 1b. If clicking INSIDE current selection bounds (without Shift), start moving selection!
-          if (
-            !e.shiftKey &&
-            canvasPos.x >= bounds.minX - pad &&
-            canvasPos.x <= bounds.maxX + pad &&
-            canvasPos.y >= bounds.minY - pad &&
-            canvasPos.y <= bounds.maxY + pad
-          ) {
-            setMode('moving');
-            return;
+          } else {
+            // Selected element is locked in place!
+            if (
+              !e.shiftKey &&
+              canvasPos.x >= bounds.minX - pad &&
+              canvasPos.x <= bounds.maxX + pad &&
+              canvasPos.y >= bounds.minY - pad &&
+              canvasPos.y <= bounds.maxY + pad
+            ) {
+              // Clicking inside keeps it selected without dragging/moving
+              return;
+            }
           }
         }
       }
@@ -384,7 +403,9 @@ export const Canvas: React.FC<CanvasProps> = ({
             selectedIdsRef.current = [hitElement.id];
           }
         }
-        setMode('moving');
+        if (!hitElement.isLocked) {
+          setMode('moving');
+        }
         return;
       }
 
@@ -440,44 +461,58 @@ export const Canvas: React.FC<CanvasProps> = ({
         const bounds = getSelectionBounds(selected);
         if (bounds) {
           const pad = 6;
-          const handles = getHandles({
-            minX: bounds.minX - pad,
-            minY: bounds.minY - pad,
-            maxX: bounds.maxX + pad,
-            maxY: bounds.maxY + pad,
-          }, viewportRef.current.zoom);
+          const isElementLocked = selected.every((el) => el.isLocked);
 
-          let foundHandle: Handle | null = null;
-          for (const h of handles) {
-            if (distance(canvasPos, { x: h.x, y: h.y }) <= 16 / viewportRef.current.zoom) {
-              foundHandle = h;
-              break;
+          if (isElementLocked) {
+            if (
+              canvasPos.x >= bounds.minX - pad &&
+              canvasPos.x <= bounds.maxX + pad &&
+              canvasPos.y >= bounds.minY - pad &&
+              canvasPos.y <= bounds.maxY + pad
+            ) {
+              setHoverCursor('not-allowed');
+              return;
             }
-          }
+          } else {
+            const handles = getHandles({
+              minX: bounds.minX - pad,
+              minY: bounds.minY - pad,
+              maxX: bounds.maxX + pad,
+              maxY: bounds.maxY + pad,
+            }, viewportRef.current.zoom);
 
-          if (foundHandle) {
-            if (foundHandle.type === 'nw' || foundHandle.type === 'se') {
-              setHoverCursor('nwse-resize');
-            } else if (foundHandle.type === 'ne' || foundHandle.type === 'sw') {
-              setHoverCursor('nesw-resize');
-            } else if (foundHandle.type === 'n' || foundHandle.type === 's') {
-              setHoverCursor('ns-resize');
-            } else if (foundHandle.type === 'e' || foundHandle.type === 'w') {
-              setHoverCursor('ew-resize');
-            } else if (foundHandle.type === 'rotation') {
-              setHoverCursor('grab');
+            let foundHandle: Handle | null = null;
+            for (const h of handles) {
+              if (distance(canvasPos, { x: h.x, y: h.y }) <= 16 / viewportRef.current.zoom) {
+                foundHandle = h;
+                break;
+              }
             }
-            return;
-          }
 
-          if (
-            canvasPos.x >= bounds.minX - pad &&
-            canvasPos.x <= bounds.maxX + pad &&
-            canvasPos.y >= bounds.minY - pad &&
-            canvasPos.y <= bounds.maxY + pad
-          ) {
-            setHoverCursor('move');
-            return;
+            if (foundHandle) {
+              if (foundHandle.type === 'nw' || foundHandle.type === 'se') {
+                setHoverCursor('nwse-resize');
+              } else if (foundHandle.type === 'ne' || foundHandle.type === 'sw') {
+                setHoverCursor('nesw-resize');
+              } else if (foundHandle.type === 'n' || foundHandle.type === 's') {
+                setHoverCursor('ns-resize');
+              } else if (foundHandle.type === 'e' || foundHandle.type === 'w') {
+                setHoverCursor('ew-resize');
+              } else if (foundHandle.type === 'rotation') {
+                setHoverCursor('grab');
+              }
+              return;
+            }
+
+            if (
+              canvasPos.x >= bounds.minX - pad &&
+              canvasPos.x <= bounds.maxX + pad &&
+              canvasPos.y >= bounds.minY - pad &&
+              canvasPos.y <= bounds.maxY + pad
+            ) {
+              setHoverCursor('move');
+              return;
+            }
           }
         }
       }
@@ -588,6 +623,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       setElements((prev) =>
         prev.map((el) => {
           if (selectedIdsRef.current.includes(el.id)) {
+            if (el.isLocked) return el;
             return {
               ...el,
               x: el.x + dx,
@@ -610,6 +646,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       setElements((prev) =>
         prev.map((el) => {
           if (!selectedIdsRef.current.includes(el.id)) return el;
+          if (el.isLocked) return el;
 
           let newX = el.x;
           let newY = el.y;
@@ -682,6 +719,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     if (mode === 'rotating' && selectedIdsRef.current.length > 0) {
       const selected = elementsRef.current.filter((el) => selectedIdsRef.current.includes(el.id));
+      if (selected.every((el) => el.isLocked)) return;
       const bounds = getSelectionBounds(selected);
       if (bounds) {
         const cx = bounds.minX + bounds.width / 2;
@@ -804,8 +842,14 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
   };
 
-  // Double click on element: edit text or add label to shape!
+  // Double click: switch to selection mode if in text tool; edit text/label if element clicked
   const handleDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // If currently in Text tool, double click switches back to Selection mode (V)
+    if (activeTool === 'text') {
+      setActiveTool('select');
+      return;
+    }
+
     const canvasPos = screenToCanvas(e.clientX, e.clientY, viewportRef.current);
     const hit = [...elementsRef.current]
       .reverse()
@@ -1052,7 +1096,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     setEditingText(null);
     setTextValue('');
     textValueRef.current = '';
-    if (!isLocked) {
+    if (!isLocked && activeTool !== 'text') {
       setActiveTool('select');
     }
     if (trimmed !== '') {
@@ -1247,6 +1291,8 @@ export const Canvas: React.FC<CanvasProps> = ({
         onDuplicate={onDuplicate}
         onDelete={onDelete}
         onReorder={onReorder}
+        onToggleLock={onToggleLockSelected}
+        isLocked={elements.find((el) => selectedIds.includes(el.id))?.isLocked}
         onZoomToFit={onZoomToFit}
         onToggleGrid={() => setShowGrid(!showGrid)}
         hasSelection={selectedIds.length > 0}

@@ -431,6 +431,35 @@ export const App: React.FC = () => {
     [selectedIds, isReadOnly, userId, handleCommitChange]
   );
 
+  // Toggle Lock on Selected Elements
+  const handleToggleLockSelected = useCallback(() => {
+    if (isReadOnly || selectedIds.length === 0) {
+      setIsLocked((prev) => !prev);
+      return;
+    }
+    const before = elementsRef.current;
+    const selected = before.filter((el) => selectedIds.includes(el.id) && !el.isDeleted);
+    const anyUnlocked = selected.some((el) => !el.isLocked);
+    const targetLockState = anyUnlocked;
+
+    const after = before.map((el) => {
+      if (selectedIds.includes(el.id)) {
+        return {
+          ...el,
+          isLocked: targetLockState,
+          version: el.version + 1,
+          versionNonce: Date.now(),
+          updatedBy: userId,
+        };
+      }
+      return el;
+    });
+
+    setElements(after);
+    handleCommitChange(before, after);
+    addToast(targetLockState ? 'Locked in place' : 'Unlocked');
+  }, [isReadOnly, selectedIds, userId, handleCommitChange, addToast]);
+
   // Zoom to Fit
   const handleZoomToFit = useCallback(() => {
     const visible = elementsRef.current.filter((e) => !e.isDeleted);
@@ -754,6 +783,8 @@ export const App: React.FC = () => {
           setActiveTool={setActiveTool}
           isLocked={isLocked}
           setIsLocked={setIsLocked}
+          selectedElements={selectedElements}
+          onToggleLockSelected={handleToggleLockSelected}
           onImageUploadClick={() => fileInputRef.current?.click()}
         />
       )}
@@ -767,6 +798,7 @@ export const App: React.FC = () => {
           onDuplicate={handleDuplicate}
           onDelete={handleDelete}
           onReorder={handleReorder}
+          onToggleLock={handleToggleLockSelected}
         />
       )}
 
@@ -797,6 +829,7 @@ export const App: React.FC = () => {
         onDuplicate={handleDuplicate}
         onDelete={handleDelete}
         onReorder={handleReorder}
+        onToggleLockSelected={handleToggleLockSelected}
         onZoomToFit={handleZoomToFit}
       />
 

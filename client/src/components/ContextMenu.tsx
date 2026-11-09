@@ -13,6 +13,8 @@ import {
   Grid,
   Edit3,
   GitBranch,
+  Lock,
+  Unlock,
 } from 'lucide-react';
 import { CanvasElement } from 'shared';
 
@@ -34,6 +36,8 @@ interface ContextMenuProps {
   onDuplicate: () => void;
   onDelete: () => void;
   onReorder: (action: 'front' | 'forward' | 'backward' | 'back') => void;
+  onToggleLock?: () => void;
+  isLocked?: boolean;
   onZoomToFit: () => void;
   onToggleGrid: () => void;
   hasSelection: boolean;
@@ -49,6 +53,8 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onDuplicate,
   onDelete,
   onReorder,
+  onToggleLock,
+  isLocked,
   onZoomToFit,
   onToggleGrid,
   hasSelection,
@@ -195,6 +201,26 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
       {hasSelection && (
         <>
           <div style={{ height: '1px', background: 'var(--border-color)', margin: '3px 0' }} />
+          {onToggleLock && (
+            <button
+              type="button"
+              className="button-group-item"
+              style={{
+                justifyContent: 'flex-start',
+                padding: '6px 10px',
+                gap: '8px',
+                color: isLocked ? '#ef4444' : undefined,
+              }}
+              onClick={() => {
+                onToggleLock();
+                onClose();
+              }}
+            >
+              {isLocked ? <Unlock size={14} /> : <Lock size={14} />}
+              {isLocked ? 'Unlock in Place' : 'Lock in Place'}
+            </button>
+          )}
+
           <button
             type="button"
             className="button-group-item"

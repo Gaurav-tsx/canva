@@ -15,13 +15,15 @@ import {
   Eraser,
   Sparkles,
 } from 'lucide-react';
-import { ToolType } from 'shared';
+import { CanvasElement, ToolType } from 'shared';
 
 interface ToolbarProps {
   activeTool: ToolType;
   setActiveTool: (tool: ToolType) => void;
   isLocked: boolean;
   setIsLocked: (locked: boolean) => void;
+  selectedElements?: CanvasElement[];
+  onToggleLockSelected?: () => void;
   onImageUploadClick: () => void;
 }
 
@@ -30,8 +32,21 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   setActiveTool,
   isLocked,
   setIsLocked,
+  selectedElements,
+  onToggleLockSelected,
   onImageUploadClick,
 }) => {
+  const hasSelection = !!selectedElements && selectedElements.length > 0;
+  const areSelectedLocked = hasSelection && selectedElements.every((el) => el.isLocked);
+  const isLockActive = hasSelection ? areSelectedLocked : isLocked;
+
+  const handleLockClick = () => {
+    if (hasSelection && onToggleLockSelected) {
+      onToggleLockSelected();
+    } else {
+      setIsLocked(!isLocked);
+    }
+  };
   const tools: {
     id: ToolType;
     label: string;
@@ -56,12 +71,21 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     <div className="floating-toolbar" role="toolbar" aria-label="Drawing tools">
       <button
         type="button"
-        className={`tool-button ${isLocked ? 'active' : ''}`}
-        onClick={() => setIsLocked(!isLocked)}
-        title={isLocked ? 'Tool is locked (won’t reset to selection)' : 'Tool lock (click to keep tool selected)'}
-        aria-label="Keep selected tool active"
+        className={`tool-button ${isLockActive ? 'active' : ''}`}
+        onClick={handleLockClick}
+        title={
+          hasSelection
+            ? areSelectedLocked
+              ? 'Unlock selected elements'
+              : 'Lock selected elements in place'
+            : isLocked
+            ? 'Tool is locked (won’t reset to selection)'
+            : 'Tool lock (click to keep tool selected)'
+        }
+        aria-label="Lock / Unlock"
+        style={hasSelection && areSelectedLocked ? { color: '#ef4444', borderColor: '#ef4444' } : undefined}
       >
-        {isLocked ? <Lock size={16} /> : <Unlock size={16} />}
+        {isLockActive ? <Lock size={16} /> : <Unlock size={16} />}
       </button>
 
       <div className="toolbar-divider" />

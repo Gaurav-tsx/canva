@@ -66,6 +66,7 @@ export interface CanvasElement {
   versionNonce: number;
   isDeleted: boolean;
   zIndex: number;
+  isLocked?: boolean;
   updatedBy: string;
   seed: number;
 }
