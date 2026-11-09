@@ -179,6 +179,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             isDarkMode,
             selectionBox,
             laserTrail,
+            editingElementId: editingText?.elementId,
           }
         );
       }
@@ -186,7 +187,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     };
     animId = requestAnimationFrame(render);
     return () => cancelAnimationFrame(animId);
-  }, [elements, viewport, selectedIds, remoteUsers, showGrid, isDarkMode, selectionBox, laserTrail]);
+  }, [elements, viewport, selectedIds, remoteUsers, showGrid, isDarkMode, selectionBox, laserTrail, editingText]);
 
   // Clean old laser trails
   useEffect(() => {
@@ -286,11 +287,12 @@ export const Canvas: React.FC<CanvasProps> = ({
         initY,
         currentStyles,
         userId,
-        { text: '', width: 140, height: 38 }
+        { text: '', width: 20, height: Math.round(currentStyles.fontSize * 1.3) }
       );
       beforeSnapshotRef.current = elementsRef.current;
       setElements((prev) => [...prev, newEl]);
       setSelectedIds([newEl.id]);
+      selectedIdsRef.current = [newEl.id];
       textValueRef.current = '';
       setTextValue('');
       setEditingText({
@@ -298,8 +300,8 @@ export const Canvas: React.FC<CanvasProps> = ({
         text: '',
         x: initX,
         y: initY,
-        width: 140,
-        height: 38,
+        width: 20,
+        height: Math.round(currentStyles.fontSize * 1.3),
         fontSize: currentStyles.fontSize,
         fontFamily: currentStyles.fontFamily,
         color: currentStyles.strokeColor,
@@ -848,11 +850,12 @@ export const Canvas: React.FC<CanvasProps> = ({
       y,
       currentStyles,
       userId,
-      { text: '', width: 140, height: 38 }
+      { text: '', width: 20, height: Math.round(currentStyles.fontSize * 1.3) }
     );
     beforeSnapshotRef.current = elementsRef.current;
     setElements((prev) => [...prev, newEl]);
     setSelectedIds([newEl.id]);
+    selectedIdsRef.current = [newEl.id];
     textValueRef.current = '';
     setTextValue('');
     setEditingText({
@@ -860,8 +863,8 @@ export const Canvas: React.FC<CanvasProps> = ({
       text: '',
       x,
       y,
-      width: 140,
-      height: 38,
+      width: 20,
+      height: Math.round(currentStyles.fontSize * 1.3),
       fontSize: currentStyles.fontSize,
       fontFamily: currentStyles.fontFamily,
       color: currentStyles.strokeColor,
@@ -1045,11 +1048,19 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
 
     onCommitChange(beforeSnapshotRef.current, elementsRef.current);
+    const finishedId = editingText.elementId;
     setEditingText(null);
     setTextValue('');
     textValueRef.current = '';
     if (!isLocked) {
       setActiveTool('select');
+    }
+    if (trimmed !== '') {
+      setSelectedIds([finishedId]);
+      selectedIdsRef.current = [finishedId];
+    } else {
+      setSelectedIds([]);
+      selectedIdsRef.current = [];
     }
     setTimeout(() => {
       isFinishingTextRef.current = false;
@@ -1132,11 +1143,13 @@ export const Canvas: React.FC<CanvasProps> = ({
         }}
       />
 
-      {/* Inline Text Editing Textarea */}
+      {/* Seamless Direct Inline Textarea */}
       {editingText && (
         <textarea
           ref={textareaRef}
           value={textValue}
+          autoFocus
+          spellCheck={false}
           onChange={(e) => {
             const val = e.target.value;
             setTextValue(val);
@@ -1144,12 +1157,20 @@ export const Canvas: React.FC<CanvasProps> = ({
 
             // Live update canvas element so text appears in real time
             if (editingText) {
+              const lines = val.split('\n');
+              const maxLine = Math.max(...lines.map((l) => l.length), 1);
+              const fs = editingText.fontSize;
+              const w = Math.max(20, maxLine * (fs * 0.6));
+              const h = Math.max(fs * 1.3, lines.length * (fs * 1.25));
+
               setElements((prev) =>
                 prev.map((el) => {
                   if (el.id === editingText.elementId) {
                     return {
                       ...el,
                       text: val,
+                      width: w,
+                      height: h,
                       version: el.version + 1,
                       versionNonce: Date.now(),
                       updatedBy: userId,
@@ -1176,13 +1197,21 @@ export const Canvas: React.FC<CanvasProps> = ({
           onBlur={() => {
             handleFinishEditingText(textValueRef.current);
           }}
-          placeholder="Type something..."
           style={{
             position: 'absolute',
             left: `${editScreenPos.x}px`,
             top: `${editScreenPos.y}px`,
-            minWidth: `${Math.max(140, editingText.width * viewport.zoom)}px`,
-            minHeight: `${Math.max(38, editingText.height * viewport.zoom)}px`,
+            minWidth: '24px',
+            width: `${Math.max(
+              30,
+              Math.max(...(textValue || ' ').split('\n').map((l) => l.length)) *
+                (editingText.fontSize * viewport.zoom * 0.6) +
+                24
+            )}px`,
+            height: `${Math.max(
+              editingText.fontSize * viewport.zoom * 1.3,
+              (textValue || ' ').split('\n').length * (editingText.fontSize * viewport.zoom * 1.25) + 6
+            )}px`,
             fontSize: `${editingText.fontSize * viewport.zoom}px`,
             fontFamily:
               editingText.fontFamily === 'normal'
@@ -1191,16 +1220,18 @@ export const Canvas: React.FC<CanvasProps> = ({
                 ? 'Fira Code, monospace'
                 : 'Caveat, Virgil, cursive',
             color: editingText.color,
-            background: isDarkMode ? '#1f1f23' : '#ffffff',
-            border: '2px solid #6366f1',
-            borderRadius: '6px',
+            background: 'transparent',
+            border: 'none',
             outline: 'none',
-            padding: '6px 10px',
-            resize: 'both',
-            lineHeight: 1.3,
+            boxShadow: 'none',
+            padding: 0,
+            margin: 0,
+            resize: 'none',
+            lineHeight: 1.25,
             zIndex: 100,
-            boxShadow: '0 4px 18px rgba(99, 102, 241, 0.25)',
-            caretColor: '#6366f1',
+            caretColor: editingText.color || '#6366f1',
+            whiteSpace: 'pre',
+            overflow: 'hidden',
           }}
         />
       )}

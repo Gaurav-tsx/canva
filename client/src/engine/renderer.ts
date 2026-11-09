@@ -45,6 +45,7 @@ export function renderScene(
     isDarkMode: boolean;
     selectionBox: { startX: number; startY: number; endX: number; endY: number } | null;
     laserTrail: { x: number; y: number; time: number }[];
+    editingElementId?: string | null;
   }
 ) {
   const ctx = canvas.getContext('2d');
@@ -83,14 +84,20 @@ export function renderScene(
     .sort((a, b) => a.zIndex - b.zIndex);
 
   for (const el of sorted) {
+    // If element is actively being edited in the transparent textarea, do not duplicate text on canvas
+    if (options.editingElementId && el.id === options.editingElementId && el.type === 'text') {
+      continue;
+    }
     drawElement(ctx, rc, el);
   }
 
   // 3. Draw Remote Users' Selections
   drawRemoteSelections(ctx, elements, remoteUsers);
 
-  // 4. Draw Local Selection Box and Handles
-  const selectedElements = sorted.filter((el) => selectedIds.includes(el.id));
+  // 4. Draw Local Selection Box and Handles (skip if currently being edited in textarea)
+  const selectedElements = sorted.filter(
+    (el) => selectedIds.includes(el.id) && el.id !== options.editingElementId
+  );
   if (selectedElements.length > 0) {
     drawLocalSelection(ctx, selectedElements, viewport);
   }
