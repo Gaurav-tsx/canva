@@ -29,6 +29,7 @@ interface ContextMenuProps {
   onClose: () => void;
   onAddText: (x: number, y: number) => void;
   onAddFlowchartShape: (type: 'rectangle' | 'diamond' | 'ellipse', text: string, x: number, y: number) => void;
+  onAddFlowchartTemplate: (x: number, y: number) => void;
   onEditText: (element: CanvasElement) => void;
   onDuplicate: () => void;
   onDelete: () => void;
@@ -43,6 +44,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onClose,
   onAddText,
   onAddFlowchartShape,
+  onAddFlowchartTemplate,
   onEditText,
   onDuplicate,
   onDelete,
@@ -177,6 +179,18 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         <Circle size={14} color="#10b981" /> Start / End
       </button>
 
+      <button
+        type="button"
+        className="button-group-item"
+        style={{ justifyContent: 'flex-start', padding: '6px 10px', gap: '8px', color: '#6366f1', fontWeight: 600 }}
+        onClick={() => {
+          onAddFlowchartTemplate(menu.canvasX, menu.canvasY);
+          onClose();
+        }}
+      >
+        <GitBranch size={14} /> Insert Full Flowchart
+      </button>
+
       {/* Element Actions if selection active */}
       {hasSelection && (
         <>
@@ -258,3 +272,4 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
     </div>
   );
 };
+

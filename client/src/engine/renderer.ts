@@ -12,22 +12,25 @@ export interface Handle {
   height: number;
 }
 
-export function getHandles(bounds: { minX: number; minY: number; maxX: number; maxY: number }): Handle[] {
-  const size = 8;
-  const half = size / 2;
+export function getHandles(
+  bounds: { minX: number; minY: number; maxX: number; maxY: number },
+  zoom: number = 1
+): Handle[] {
+  const size = 8 / zoom;
   const cx = (bounds.minX + bounds.maxX) / 2;
   const cy = (bounds.minY + bounds.maxY) / 2;
+  const rotY = bounds.minY - 24 / zoom;
 
   return [
-    { type: 'nw', x: bounds.minX - half, y: bounds.minY - half, width: size, height: size },
-    { type: 'n', x: cx - half, y: bounds.minY - half, width: size, height: size },
-    { type: 'ne', x: bounds.maxX - half, y: bounds.minY - half, width: size, height: size },
-    { type: 'e', x: bounds.maxX - half, y: cy - half, width: size, height: size },
-    { type: 'se', x: bounds.maxX - half, y: bounds.maxY - half, width: size, height: size },
-    { type: 's', x: cx - half, y: bounds.maxY - half, width: size, height: size },
-    { type: 'sw', x: bounds.minX - half, y: bounds.maxY - half, width: size, height: size },
-    { type: 'w', x: bounds.minX - half, y: cy - half, width: size, height: size },
-    { type: 'rotation', x: cx - half, y: bounds.minY - 24 - half, width: size, height: size },
+    { type: 'nw', x: bounds.minX, y: bounds.minY, width: size, height: size },
+    { type: 'n', x: cx, y: bounds.minY, width: size, height: size },
+    { type: 'ne', x: bounds.maxX, y: bounds.minY, width: size, height: size },
+    { type: 'e', x: bounds.maxX, y: cy, width: size, height: size },
+    { type: 'se', x: bounds.maxX, y: bounds.maxY, width: size, height: size },
+    { type: 's', x: cx, y: bounds.maxY, width: size, height: size },
+    { type: 'sw', x: bounds.minX, y: bounds.maxY, width: size, height: size },
+    { type: 'w', x: bounds.minX, y: cy, width: size, height: size },
+    { type: 'rotation', x: cx, y: rotY, width: size, height: size },
   ];
 }
 
@@ -160,24 +163,22 @@ function drawLocalSelection(
   ctx.stroke();
 
   // Handles
-  const handles = getHandles({ minX, minY, maxX, maxY });
+  const handles = getHandles({ minX, minY, maxX, maxY }, viewport.zoom);
   ctx.fillStyle = '#ffffff';
   ctx.strokeStyle = '#6366f1';
   ctx.lineWidth = 1.5 / viewport.zoom;
 
-  for (const handle of handles) {
-    const handleSize = 8 / viewport.zoom;
-    const hx = handle.type === 'rotation' ? cx - handleSize / 2 : handle.x;
-    const hy = handle.type === 'rotation' ? rotY - handleSize / 2 : handle.y;
+  const handleSize = 8 / viewport.zoom;
 
+  for (const handle of handles) {
     if (handle.type === 'rotation') {
       ctx.beginPath();
-      ctx.arc(cx, rotY, handleSize / 2, 0, Math.PI * 2);
+      ctx.arc(handle.x, handle.y, handleSize / 2, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     } else {
-      ctx.fillRect(hx, hy, handleSize, handleSize);
-      ctx.strokeRect(hx, hy, handleSize, handleSize);
+      ctx.fillRect(handle.x - handleSize / 2, handle.y - handleSize / 2, handleSize, handleSize);
+      ctx.strokeRect(handle.x - handleSize / 2, handle.y - handleSize / 2, handleSize, handleSize);
     }
   }
 

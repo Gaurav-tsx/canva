@@ -3,6 +3,7 @@ import {
   CanvasElement,
   distance,
   getElementBounds,
+  getSelectionBounds,
   isPointInElement,
   rotatePoint,
   snapToGrid,
@@ -111,6 +112,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   // Context Menu State
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [hoverCursor, setHoverCursor] = useState<string>('default');
 
   // Snapshot before interaction for history
   const beforeSnapshotRef = useRef<CanvasElement[]>([]);
@@ -320,7 +322,6 @@ export const Canvas: React.FC<CanvasProps> = ({
         const selected = elementsRef.current.filter(
           (el) => selectedIdsRef.current.includes(el.id) && !el.isDeleted
         );
-        const { getSelectionBounds } = require('shared');
         const bounds = getSelectionBounds(selected);
         if (bounds) {
           const pad = 6;
@@ -329,12 +330,10 @@ export const Canvas: React.FC<CanvasProps> = ({
             minY: bounds.minY - pad,
             maxX: bounds.maxX + pad,
             maxY: bounds.maxY + pad,
-          });
+          }, viewportRef.current.zoom);
 
           for (const h of handles) {
-            const hx = h.type === 'rotation' ? (bounds.minX + bounds.maxX) / 2 : h.x + 4;
-            const hy = h.type === 'rotation' ? bounds.minY - pad - 24 : h.y + 4;
-            if (distance(canvasPos, { x: hx, y: hy }) <= 12 / viewportRef.current.zoom) {
+            if (distance(canvasPos, { x: h.x, y: h.y }) <= 16 / viewportRef.current.zoom) {
               if (h.type === 'rotation') {
                 setMode('rotating');
               } else {
@@ -343,6 +342,18 @@ export const Canvas: React.FC<CanvasProps> = ({
               }
               return;
             }
+          }
+
+          // 1b. If clicking INSIDE current selection bounds (without Shift), start moving selection!
+          if (
+            !e.shiftKey &&
+            canvasPos.x >= bounds.minX - pad &&
+            canvasPos.x <= bounds.maxX + pad &&
+            canvasPos.y >= bounds.minY - pad &&
+            canvasPos.y <= bounds.maxY + pad
+          ) {
+            setMode('moving');
+            return;
           }
         }
       }
@@ -356,14 +367,19 @@ export const Canvas: React.FC<CanvasProps> = ({
         if (e.shiftKey) {
           // Toggle selection with shift
           if (selectedIdsRef.current.includes(hitElement.id)) {
-            setSelectedIds((prev) => prev.filter((id) => id !== hitElement.id));
+            const next = selectedIdsRef.current.filter((id) => id !== hitElement.id);
+            setSelectedIds(next);
+            selectedIdsRef.current = next;
           } else {
-            setSelectedIds((prev) => [...prev, hitElement.id]);
+            const next = [...selectedIdsRef.current, hitElement.id];
+            setSelectedIds(next);
+            selectedIdsRef.current = next;
           }
         } else {
           // If clicking an unselected element without shift, select only it
           if (!selectedIdsRef.current.includes(hitElement.id)) {
             setSelectedIds([hitElement.id]);
+            selectedIdsRef.current = [hitElement.id];
           }
         }
         setMode('moving');
@@ -373,6 +389,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       // 3. Clicked empty space -> start marquee drag-select
       if (!e.shiftKey) {
         setSelectedIds([]);
+        selectedIdsRef.current = [];
       }
       setMode('marquee');
       setSelectionBox({
@@ -411,6 +428,66 @@ export const Canvas: React.FC<CanvasProps> = ({
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvasPos = screenToCanvas(e.clientX, e.clientY, viewportRef.current);
     onCursorMove(canvasPos.x, canvasPos.y, mode === 'laser');
+
+    // Handle cursor hover states when in selection mode
+    if (mode === 'none' && activeTool === 'select') {
+      if (selectedIdsRef.current.length > 0) {
+        const selected = elementsRef.current.filter(
+          (el) => selectedIdsRef.current.includes(el.id) && !el.isDeleted
+        );
+        const bounds = getSelectionBounds(selected);
+        if (bounds) {
+          const pad = 6;
+          const handles = getHandles({
+            minX: bounds.minX - pad,
+            minY: bounds.minY - pad,
+            maxX: bounds.maxX + pad,
+            maxY: bounds.maxY + pad,
+          }, viewportRef.current.zoom);
+
+          let foundHandle: Handle | null = null;
+          for (const h of handles) {
+            if (distance(canvasPos, { x: h.x, y: h.y }) <= 16 / viewportRef.current.zoom) {
+              foundHandle = h;
+              break;
+            }
+          }
+
+          if (foundHandle) {
+            if (foundHandle.type === 'nw' || foundHandle.type === 'se') {
+              setHoverCursor('nwse-resize');
+            } else if (foundHandle.type === 'ne' || foundHandle.type === 'sw') {
+              setHoverCursor('nesw-resize');
+            } else if (foundHandle.type === 'n' || foundHandle.type === 's') {
+              setHoverCursor('ns-resize');
+            } else if (foundHandle.type === 'e' || foundHandle.type === 'w') {
+              setHoverCursor('ew-resize');
+            } else if (foundHandle.type === 'rotation') {
+              setHoverCursor('grab');
+            }
+            return;
+          }
+
+          if (
+            canvasPos.x >= bounds.minX - pad &&
+            canvasPos.x <= bounds.maxX + pad &&
+            canvasPos.y >= bounds.minY - pad &&
+            canvasPos.y <= bounds.maxY + pad
+          ) {
+            setHoverCursor('move');
+            return;
+          }
+        }
+      }
+
+      const hit = elementsRef.current.some((el) => isPointInElement(canvasPos, el));
+      if (hit) {
+        setHoverCursor('move');
+        return;
+      }
+
+      setHoverCursor('default');
+    }
 
     if (mode === 'panning') {
       const dx = e.clientX - startPoint.x;
@@ -574,12 +651,24 @@ export const Canvas: React.FC<CanvasProps> = ({
               break;
           }
 
+          // If text element, handle width/height boundaries and scale font size on corner/vertical drag
+          let fontSize = el.fontSize;
+          if (el.type === 'text') {
+            const minHeight = 24;
+            if (newH < minHeight) newH = minHeight;
+            if (newW < 40) newW = 40;
+            if (['nw', 'ne', 'se', 'sw', 'n', 's'].includes(activeHandle.type)) {
+              fontSize = Math.max(12, Math.min(96, Math.round(newH * 0.6)));
+            }
+          }
+
           return {
             ...el,
             x: newX,
             y: newY,
             width: newW,
             height: newH,
+            fontSize,
             version: el.version + 1,
             versionNonce: Date.now(),
           };
@@ -591,7 +680,6 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     if (mode === 'rotating' && selectedIdsRef.current.length > 0) {
       const selected = elementsRef.current.filter((el) => selectedIdsRef.current.includes(el.id));
-      const { getSelectionBounds } = require('shared');
       const bounds = getSelectionBounds(selected);
       if (bounds) {
         const cx = bounds.minX + bounds.width / 2;
@@ -658,6 +746,27 @@ export const Canvas: React.FC<CanvasProps> = ({
       if (!isLocked) {
         setActiveTool('select');
       }
+    }
+
+    if (mode === 'resizing') {
+      setElements((prev) =>
+        prev.map((el) => {
+          if (!selectedIdsRef.current.includes(el.id)) return el;
+          let x = el.x;
+          let y = el.y;
+          let width = el.width;
+          let height = el.height;
+          if (width < 0) {
+            x += width;
+            width = Math.abs(width);
+          }
+          if (height < 0) {
+            y += height;
+            height = Math.abs(height);
+          }
+          return { ...el, x, y, width, height };
+        })
+      );
     }
 
     if (mode === 'drawing' || mode === 'moving' || mode === 'resizing' || mode === 'rotating' || mode === 'erasing') {
@@ -805,6 +914,81 @@ export const Canvas: React.FC<CanvasProps> = ({
     onCommitChange(before, after);
   };
 
+  const handleAddFlowchartTemplate = (cx: number, cy: number) => {
+    const startX = cx - 70;
+    const startY = cy - 140;
+
+    const startNode = createElement(
+      'ellipse',
+      startX,
+      startY,
+      { ...currentStyles, fillStyle: 'hachure', fillColor: '#b2f2bb', strokeColor: '#2f9e44' },
+      userId,
+      { width: 140, height: 60, text: 'Start' }
+    );
+
+    const arrow1 = createElement(
+      'arrow',
+      startX + 70,
+      startY + 60,
+      { ...currentStyles, strokeColor: '#1e1e1e', strokeWidth: 2 },
+      userId,
+      { width: 0, height: 50 }
+    );
+
+    const processNode = createElement(
+      'rectangle',
+      startX - 10,
+      startY + 110,
+      { ...currentStyles, fillStyle: 'hachure', fillColor: '#a5d8ff', strokeColor: '#1971c2' },
+      userId,
+      { width: 160, height: 70, text: 'Process Step' }
+    );
+
+    const arrow2 = createElement(
+      'arrow',
+      startX + 70,
+      startY + 180,
+      { ...currentStyles, strokeColor: '#1e1e1e', strokeWidth: 2 },
+      userId,
+      { width: 0, height: 50 }
+    );
+
+    const decisionNode = createElement(
+      'diamond',
+      startX - 15,
+      startY + 230,
+      { ...currentStyles, fillStyle: 'hachure', fillColor: '#ffec99', strokeColor: '#f08c00' },
+      userId,
+      { width: 170, height: 90, text: 'Is Valid?' }
+    );
+
+    const arrow3 = createElement(
+      'arrow',
+      startX + 70,
+      startY + 320,
+      { ...currentStyles, strokeColor: '#1e1e1e', strokeWidth: 2 },
+      userId,
+      { width: 0, height: 50 }
+    );
+
+    const endNode = createElement(
+      'ellipse',
+      startX,
+      startY + 370,
+      { ...currentStyles, fillStyle: 'hachure', fillColor: '#b2f2bb', strokeColor: '#2f9e44' },
+      userId,
+      { width: 140, height: 60, text: 'End' }
+    );
+
+    const newItems = [startNode, arrow1, processNode, arrow2, decisionNode, arrow3, endNode];
+    const before = elementsRef.current;
+    const after = [...before, ...newItems];
+    setElements(after);
+    setSelectedIds(newItems.map((n) => n.id));
+    onCommitChange(before, after);
+  };
+
   const handleStartEditText = (target: CanvasElement) => {
     beforeSnapshotRef.current = elementsRef.current;
     const initial = target.text || '';
@@ -924,15 +1108,27 @@ export const Canvas: React.FC<CanvasProps> = ({
               ? 'grabbing'
               : activeTool === 'hand' || isSpacePressedRef.current
               ? 'grab'
+              : mode === 'moving'
+              ? 'move'
+              : mode === 'resizing' && activeHandle
+              ? activeHandle.type === 'nw' || activeHandle.type === 'se'
+                ? 'nwse-resize'
+                : activeHandle.type === 'ne' || activeHandle.type === 'sw'
+                ? 'nesw-resize'
+                : activeHandle.type === 'n' || activeHandle.type === 's'
+                ? 'ns-resize'
+                : 'ew-resize'
+              : mode === 'rotating'
+              ? 'grabbing'
               : activeTool === 'laser'
               ? 'crosshair'
               : activeTool === 'eraser'
               ? 'cell'
               : activeTool === 'text'
               ? 'text'
-              : activeTool !== 'select'
-              ? 'crosshair'
-              : 'default',
+              : activeTool === 'select'
+              ? hoverCursor
+              : 'crosshair',
         }}
       />
 
@@ -1015,6 +1211,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         onClose={() => setContextMenu(null)}
         onAddText={handleAddTextAt}
         onAddFlowchartShape={handleAddFlowchartShape}
+        onAddFlowchartTemplate={handleAddFlowchartTemplate}
         onEditText={handleStartEditText}
         onDuplicate={onDuplicate}
         onDelete={onDelete}
