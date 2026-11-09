@@ -94,10 +94,13 @@ export const Canvas: React.FC<CanvasProps> = ({
     color: string;
     isNew: boolean;
   } | null>(null);
+  const [textValue, setTextValue] = useState<string>('');
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Snapshot before interaction for history
   const beforeSnapshotRef = useRef<CanvasElement[]>([]);
   const isSpacePressedRef = useRef<boolean>(false);
+  const isFinishingTextRef = useRef<boolean>(false);
 
   // Keep elements and selectedIds in refs for event listeners
   const elementsRef = useRef(elements);
@@ -106,6 +109,20 @@ export const Canvas: React.FC<CanvasProps> = ({
   selectedIdsRef.current = selectedIds;
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport;
+
+  // Auto-focus textarea whenever text editing starts
+  useEffect(() => {
+    if (editingText) {
+      setTextValue(editingText.text);
+      const timer = setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+          textareaRef.current.select();
+        }
+      }, 30);
+      return () => clearTimeout(timer);
+    }
+  }, [editingText]);
 
   // Track window resize & high-DPI scaling
   useEffect(() => {
@@ -182,8 +199,11 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   // Pointer Down
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (editingText) return;
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    // If text editing was active and user clicked elsewhere, finish previous text
+    if (editingText) {
+      handleFinishEditingText(textValue);
+      return;
+    }
 
     const screenPos = { x: e.clientX, y: e.clientY };
     const canvasPos = screenToCanvas(e.clientX, e.clientY, viewportRef.current);
@@ -191,6 +211,9 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     // Pan with spacebar, middle mouse, or Hand tool
     if (e.button === 1 || isSpacePressedRef.current || activeTool === 'hand') {
+      try {
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      } catch {}
       setMode('panning');
       setStartPoint(screenPos);
       setStartViewport(viewportRef.current);
@@ -201,6 +224,9 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     // Laser tool
     if (activeTool === 'laser') {
+      try {
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      } catch {}
       setMode('laser');
       const point = { x: canvasPos.x, y: canvasPos.y, time: Date.now() };
       setLaserTrail((prev) => [...prev, point]);
@@ -210,31 +236,42 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     // Eraser tool
     if (activeTool === 'eraser') {
+      try {
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      } catch {}
       setMode('erasing');
       beforeSnapshotRef.current = elementsRef.current;
       eraseAtPoint(canvasPos);
       return;
     }
 
-    // Text tool: click to place text
+    // Text tool: click to place text (DO NOT call setPointerCapture so textarea gets instant focus)
     if (activeTool === 'text') {
+      let initX = canvasPos.x;
+      let initY = canvasPos.y;
+      if (snapGrid) {
+        initX = snapToGrid(initX);
+        initY = snapToGrid(initY);
+      }
+
       const newEl = createElement(
         'text',
-        canvasPos.x,
-        canvasPos.y,
+        initX,
+        initY,
         currentStyles,
         userId,
-        { text: '', width: 120, height: 32 }
+        { text: '', width: 140, height: 38 }
       );
       beforeSnapshotRef.current = elementsRef.current;
       setElements((prev) => [...prev, newEl]);
+      setSelectedIds([newEl.id]);
       setEditingText({
         elementId: newEl.id,
         text: '',
-        x: canvasPos.x,
-        y: canvasPos.y,
+        x: initX,
+        y: initY,
         width: 160,
-        height: 36,
+        height: 40,
         fontSize: currentStyles.fontSize,
         fontFamily: currentStyles.fontFamily,
         color: currentStyles.strokeColor,
@@ -242,6 +279,11 @@ export const Canvas: React.FC<CanvasProps> = ({
       });
       return;
     }
+
+    // For selection and shape drawing tools, capture pointer
+    try {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {}
 
     // Selection tool
     if (activeTool === 'select') {
@@ -550,7 +592,11 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   // Pointer Up
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    try {
+      if ((e.target as HTMLElement).hasPointerCapture(e.pointerId)) {
+        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      }
+    } catch {}
 
     if (mode === 'drawing' && activeElementId) {
       // Normalize negative width/height
@@ -635,7 +681,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         text: hit.text || '',
         x: hit.x,
         y: hit.y,
-        width: Math.max(120, hit.width),
+        width: Math.max(140, hit.width),
         height: Math.max(40, hit.height),
         fontSize: hit.fontSize || 20,
         fontFamily: hit.fontFamily || 'hand',
@@ -646,23 +692,31 @@ export const Canvas: React.FC<CanvasProps> = ({
   };
 
   // Finish editing text
-  const handleFinishEditingText = (textValue: string) => {
-    if (!editingText) return;
+  const handleFinishEditingText = (finalText: string) => {
+    if (!editingText || isFinishingTextRef.current) return;
+    isFinishingTextRef.current = true;
 
-    if (textValue.trim() === '') {
+    const trimmed = finalText.trim();
+    if (trimmed === '') {
       if (editingText.isNew) {
         // Delete empty new text element
         setElements((prev) => prev.filter((el) => el.id !== editingText.elementId));
       }
     } else {
+      const lines = finalText.split('\n');
+      const maxLineLen = Math.max(...lines.map((l) => l.length), 1);
+      const fs = editingText.fontSize || 20;
+      const width = Math.max(60, maxLineLen * (fs * 0.6) + 16);
+      const height = Math.max(28, lines.length * (fs * 1.3));
+
       setElements((prev) =>
         prev.map((el) => {
           if (el.id === editingText.elementId) {
             return {
               ...el,
-              text: textValue,
-              width: Math.max(100, textValue.length * 12),
-              height: Math.max(30, textValue.split('\n').length * 28),
+              text: finalText,
+              width,
+              height,
               version: el.version + 1,
               versionNonce: Date.now(),
               updatedBy: userId,
@@ -675,7 +729,13 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     onCommitChange(beforeSnapshotRef.current, elementsRef.current);
     setEditingText(null);
-    if (!isLocked) setActiveTool('select');
+    setTextValue('');
+    if (!isLocked) {
+      setActiveTool('select');
+    }
+    setTimeout(() => {
+      isFinishingTextRef.current = false;
+    }, 150);
   };
 
   // Wheel listener: Zoom with Ctrl/Cmd or trackpad pinch, Pan otherwise
@@ -745,20 +805,40 @@ export const Canvas: React.FC<CanvasProps> = ({
       {/* Inline Text Editing Textarea */}
       {editingText && (
         <textarea
-          autoFocus
-          defaultValue={editingText.text}
-          onBlur={(e) => handleFinishEditingText(e.target.value)}
+          ref={textareaRef}
+          value={textValue}
+          onChange={(e) => {
+            setTextValue(e.target.value);
+            const lines = e.target.value.split('\n');
+            const maxLineLen = Math.max(...lines.map((l) => l.length), 4);
+            const fs = editingText.fontSize || 20;
+            const newW = Math.max(140, maxLineLen * (fs * 0.65) + 30);
+            const newH = Math.max(38, lines.length * (fs * 1.35) + 12);
+            setEditingText((prev) => prev ? { ...prev, width: newW, height: newH } : null);
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => {
+            e.stopPropagation(); // Stops global shortcuts from intercepting typing
             if (e.key === 'Escape') {
-              handleFinishEditingText(e.currentTarget.value);
+              handleFinishEditingText(textValue);
+            }
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+              handleFinishEditingText(textValue);
             }
           }}
+          onBlur={() => {
+            handleFinishEditingText(textValue);
+          }}
+          placeholder="Type something..."
           style={{
             position: 'absolute',
             left: `${editScreenPos.x}px`,
             top: `${editScreenPos.y}px`,
-            minWidth: `${Math.max(120, editingText.width * viewport.zoom)}px`,
-            minHeight: `${Math.max(40, editingText.height * viewport.zoom)}px`,
+            minWidth: `${Math.max(140, editingText.width * viewport.zoom)}px`,
+            minHeight: `${Math.max(38, editingText.height * viewport.zoom)}px`,
             fontSize: `${editingText.fontSize * viewport.zoom}px`,
             fontFamily:
               editingText.fontFamily === 'normal'
@@ -767,14 +847,16 @@ export const Canvas: React.FC<CanvasProps> = ({
                 ? 'Fira Code, monospace'
                 : 'Caveat, Virgil, cursive',
             color: editingText.color,
-            background: 'transparent',
-            border: '1.5px dashed #6366f1',
-            borderRadius: '4px',
+            background: isDarkMode ? '#1f1f23' : '#ffffff',
+            border: '2px solid #6366f1',
+            borderRadius: '6px',
             outline: 'none',
-            padding: '4px 6px',
+            padding: '6px 10px',
             resize: 'both',
-            lineHeight: 1.25,
-            zIndex: 60,
+            lineHeight: 1.3,
+            zIndex: 100,
+            boxShadow: '0 4px 18px rgba(99, 102, 241, 0.25)',
+            caretColor: '#6366f1',
           }}
         />
       )}
